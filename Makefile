@@ -2,3 +2,8 @@
 ## them to one object file called  : "myshell" 
 ## so we should run make , that will create our object myshell ,
 ## ./myshell should run your application 
+myshell: command.cc tokenizer.cc command.h tokenizer.h
+	g++ -std=c++17 command.cc tokenizer.cc -o myshell
+
+clean:
+	rm -f myshell
