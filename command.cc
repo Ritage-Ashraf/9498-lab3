@@ -224,22 +224,31 @@ bool expectingFilename = false;
         currentCommand.print();
     }
 
-    // 9. Free any unfinished simple command
-    if (currentSimpleCommand != nullptr)
+  // Free any unfinished simple command
+if (currentSimpleCommand != nullptr)
+{
+    for (int j = 0;
+         j < currentSimpleCommand->_numberOfArguments;
+         j++)
     {
-        for (int j = 0;
-             j < currentSimpleCommand->_numberOfArguments;
-             j++)
-        {
-            free(currentSimpleCommand->_arguments[j]);
-        }
-
-        free(currentSimpleCommand->_arguments);
-        delete currentSimpleCommand;
+        free(currentSimpleCommand->_arguments[j]);
     }
 
+    free(currentSimpleCommand->_arguments);
+    delete currentSimpleCommand;
+}
+
+// Execute only if parsing succeeded and a command exists
+if (valid && currentCommand._numberOfSimpleCommands > 0)
+{
+    currentCommand.execute();
+}
+else
+{
     currentCommand.clear();
-    //currentCommand.execute();
+}
+
+    
     /*
       Implement this function 
       you must parse for all possible tokens scenario
@@ -363,13 +372,88 @@ void Command::print()
 
 void Command::execute()
 {
+       // Display the parsed command table
     print();
-    /*
-        Write your code here
-    */
 
+    // Make sure a command exists
+    if (_numberOfSimpleCommands == 0)
+    {
+        clear();
+        return;
+    }
+
+    // Pipes will be implemented in the next stage
+    if (_numberOfSimpleCommands > 1)
+    {
+        std::cerr << "Error: pipes are not implemented yet\n";
+        clear();
+        return;
+    }
+
+    // Redirection will be implemented in the next stage
+    if (_outFile != nullptr ||
+        _inputFile != nullptr ||
+        _errFile != nullptr)
+    {
+        std::cerr << "Error: redirection is not implemented yet\n";
+        clear();
+        return;
+    }
+
+    // Get the simple command and its arguments
+    SimpleCommand *simpleCommand = _simpleCommands[0];
+
+    // Create a child process
+    pid_t pid = fork();
+
+    if (pid < 0)
+    {
+        perror("fork");
+        clear();
+        return;
+    }
+
+    if (pid == 0)
+    {
+        // CHILD PROCESS:
+        // Replace the child process with the requested program
+        execvp(simpleCommand->_arguments[0],
+               simpleCommand->_arguments);
+
+        // This line executes only if execvp fails
+        perror(simpleCommand->_arguments[0]);
+
+        _exit(127);
+    }
+    else
+    {
+        // PARENT PROCESS:
+        if (_background == 0)
+        {
+            // Foreground: wait for the child to finish
+            int status;
+
+            while (waitpid(pid, &status, 0) == -1)
+            {
+                if (errno == EINTR)
+                {
+                    continue;
+                }
+
+                perror("waitpid");
+                break;
+            }
+        }
+        else
+        {
+            // Background: do not wait for the child
+            std::cout << "Started background process: "
+                      << pid << std::endl;
+        }
+    }
+
+    // Free the command's allocated memory
     clear();
-    prompt();
 }
 
 void Command::prompt()
