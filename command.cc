@@ -393,6 +393,7 @@ void Command::execute()
     // Get the simple command and its arguments
     SimpleCommand *simpleCommand = _simpleCommands[0];
 
+    // Create a child process
     pid_t pid = fork();
 
     if (pid < 0)
@@ -404,36 +405,59 @@ void Command::execute()
 
     if (pid == 0)
     {
-
-        // Handle output redirection using >
-        if (_outFile != nullptr && _append == 0)
+        //input redirection: <
+        if (_inputFile != nullptr)
         {
-          
-            int fd = open(_outFile,
-                          O_WRONLY | O_CREAT | O_TRUNC,
-                          0644);
+            int fd = open(_inputFile, O_RDONLY);
 
-           
+            if (fd < 0)
+            {
+                perror("open input file");
+                _exit(1);
+            }
+            if (dup2(fd, STDIN_FILENO) < 0)
+            {
+                perror("dup2 input");
+                close(fd);
+                _exit(1);
+            }
+
+            close(fd);
+        }
+        // output redirection: > and >>
+        if (_outFile != nullptr)
+        {
+            int flags = O_WRONLY | O_CREAT;
+
+            if (_append == 1)
+            {
+                flags |= O_APPEND;
+            }
+            else
+            {
+                flags |= O_TRUNC;
+            }
+
+            int fd = open(_outFile, flags, 0644);
             if (fd < 0)
             {
                 perror("open output file");
                 _exit(1);
             }
-
             if (dup2(fd, STDOUT_FILENO) < 0)
             {
                 perror("dup2 output");
                 close(fd);
                 _exit(1);
             }
+
+
             close(fd);
         }
 
-   
         execvp(simpleCommand->_arguments[0],
                simpleCommand->_arguments);
 
-  
         perror(simpleCommand->_arguments[0]);
 
         _exit(127);
@@ -441,9 +465,10 @@ void Command::execute()
     else
     {
         // PARENT PROCESS
+
         if (_background == 0)
         {
-         
+            // Foreground: wait for the child to finish
             int status;
 
             while (waitpid(pid, &status, 0) == -1)
@@ -459,6 +484,7 @@ void Command::execute()
         }
         else
         {
+            // Background: do not wait for the child
             std::cout << "Started background process: "
                       << pid << std::endl;
         }
