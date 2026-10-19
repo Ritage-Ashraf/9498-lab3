@@ -49,7 +49,7 @@ bool expectingFilename = false;
         // 1. Handle redirection filenames
         if (expectingFilename)
         {
-            if (token.type != TOKEN_COMMAND &&
+            if (//token.type != TOKEN_COMMAND &&
                 token.type != TOKEN_ARGUMENT)
             {
                 std::cerr << "Error: missing or invalid redirection filename\n";
@@ -197,13 +197,13 @@ bool expectingFilename = false;
     }
 
     // 6. Check whether a redirection filename is missing
-    if (expectingFilename)
+    if (expectingFilename)//should be false
     {
         std::cerr << "Error: missing redirection filename\n";
         valid = false;
     }
 
-    // 7. Add the last simple command
+    // 7. Add the last simple command, after the pipe 
     if (valid)
     {
         if (currentSimpleCommand->_numberOfArguments > 0)
@@ -211,7 +211,7 @@ bool expectingFilename = false;
             currentCommand.insertSimpleCommand(currentSimpleCommand);
             currentSimpleCommand = nullptr;
         }
-        else if (currentCommand._numberOfSimpleCommands > 0)
+        else if (currentCommand._numberOfSimpleCommands > 0)//currentsimple empty but the current command is not empty
         {
             std::cerr << "Error: missing command after pipe\n";
             valid = false;
@@ -372,7 +372,7 @@ void Command::print()
 
 void Command::execute()
 {
-       // Display the parsed command table
+    // Display the parsed command table
     print();
 
     // Make sure a command exists
@@ -390,20 +390,9 @@ void Command::execute()
         return;
     }
 
-    // Redirection will be implemented in the next stage
-    if (_outFile != nullptr ||
-        _inputFile != nullptr ||
-        _errFile != nullptr)
-    {
-        std::cerr << "Error: redirection is not implemented yet\n";
-        clear();
-        return;
-    }
-
     // Get the simple command and its arguments
     SimpleCommand *simpleCommand = _simpleCommands[0];
 
-    // Create a child process
     pid_t pid = fork();
 
     if (pid < 0)
@@ -415,22 +404,46 @@ void Command::execute()
 
     if (pid == 0)
     {
-        // CHILD PROCESS:
-        // Replace the child process with the requested program
+
+        // Handle output redirection using >
+        if (_outFile != nullptr && _append == 0)
+        {
+          
+            int fd = open(_outFile,
+                          O_WRONLY | O_CREAT | O_TRUNC,
+                          0644);
+
+           
+            if (fd < 0)
+            {
+                perror("open output file");
+                _exit(1);
+            }
+
+            if (dup2(fd, STDOUT_FILENO) < 0)
+            {
+                perror("dup2 output");
+                close(fd);
+                _exit(1);
+            }
+            close(fd);
+        }
+
+   
         execvp(simpleCommand->_arguments[0],
                simpleCommand->_arguments);
 
-        // This line executes only if execvp fails
+  
         perror(simpleCommand->_arguments[0]);
 
         _exit(127);
     }
     else
     {
-        // PARENT PROCESS:
+        // PARENT PROCESS
         if (_background == 0)
         {
-            // Foreground: wait for the child to finish
+         
             int status;
 
             while (waitpid(pid, &status, 0) == -1)
@@ -446,7 +459,6 @@ void Command::execute()
         }
         else
         {
-            // Background: do not wait for the child
             std::cout << "Started background process: "
                       << pid << std::endl;
         }
@@ -455,7 +467,6 @@ void Command::execute()
     // Free the command's allocated memory
     clear();
 }
-
 void Command::prompt()
 {
     printf("myshell>");
