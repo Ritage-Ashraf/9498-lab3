@@ -372,106 +372,224 @@ void Command::print()
 
 void Command::execute()
 {
-    // Display the parsed command table
     print();
-
-    // Make sure a command exists
     if (_numberOfSimpleCommands == 0)
     {
         clear();
         return;
     }
 
-    // Pipes will be implemented in the next stage
-    if (_numberOfSimpleCommands > 1)
+    int numberOfCommands = _numberOfSimpleCommands;
+    std::vector<pid_t> pids;
+
+    int previousRead = -1;
+
+    // Create and execute each simple command
+    for (int i = 0; i < numberOfCommands; i++)
     {
-        std::cerr << "Error: pipes are not implemented yet\n";
-        clear();
-        return;
-    }
+        int pipefd[2] = {-1, -1};
 
-    // Get the simple command and its arguments
-    SimpleCommand *simpleCommand = _simpleCommands[0];
-
-    // Create a child process
-    pid_t pid = fork();
-
-    if (pid < 0)
-    {
-        perror("fork");
-        clear();
-        return;
-    }
-
-    if (pid == 0)
-    {
-        //input redirection: <
-        if (_inputFile != nullptr)
+        // Create a pipe if another command follows
+        if (i < numberOfCommands - 1)
         {
-            int fd = open(_inputFile, O_RDONLY);
-
-            if (fd < 0)
+            if (pipe(pipefd) < 0)
             {
-                perror("open input file");
-                _exit(1);
-            }
-            if (dup2(fd, STDIN_FILENO) < 0)
-            {
-                perror("dup2 input");
-                close(fd);
-                _exit(1);
-            }
+                perror("pipe");
 
-            close(fd);
-        }
-        // output redirection: > and >>
-        if (_outFile != nullptr)
-        {
-            int flags = O_WRONLY | O_CREAT;
+                if (previousRead != -1)
+                {
+                    close(previousRead);
+                }
 
-            if (_append == 1)
-            {
-                flags |= O_APPEND;
+                clear();
+                return;
             }
-            else
-            {
-                flags |= O_TRUNC;
-            }
-
-            int fd = open(_outFile, flags, 0644);
-            if (fd < 0)
-            {
-                perror("open output file");
-                _exit(1);
-            }
-            if (dup2(fd, STDOUT_FILENO) < 0)
-            {
-                perror("dup2 output");
-                close(fd);
-                _exit(1);
-            }
-
-
-            close(fd);
         }
 
-        execvp(simpleCommand->_arguments[0],
-               simpleCommand->_arguments);
+        // Create a child process
+        pid_t pid = fork();
 
-        perror(simpleCommand->_arguments[0]);
-
-        _exit(127);
-    }
-    else
-    {
-        // PARENT PROCESS
-
-        if (_background == 0)
+        if (pid < 0)
         {
-            // Foreground: wait for the child to finish
-            int status;
+            perror("fork");
 
-            while (waitpid(pid, &status, 0) == -1)
+            if (previousRead != -1)
+            {
+                close(previousRead);
+            }
+
+            if (pipefd[0] != -1)
+            {
+                close(pipefd[0]);
+                close(pipefd[1]);
+            }
+
+            // Reap children that were already created
+
+            clear();
+            return;
+        }
+
+        if (pid == 0)
+        {
+            // CHILD PROCESS
+
+            // Connect input to the previous pipe
+            if (previousRead != -1)
+            {
+                if (dup2(previousRead, STDIN_FILENO) < 0)
+                {
+                    perror("dup2 pipe input");
+                    _exit(1);
+                }
+            }
+
+            // Connect output to the next pipe
+            if (i < numberOfCommands - 1)
+            {
+                if (dup2(pipefd[1], STDOUT_FILENO) < 0)
+                {
+                    perror("dup2 pipe output");
+                    _exit(1);
+                }
+            }//after dup2 
+            if (previousRead != -1)
+            {
+                close(previousRead);
+            }
+
+            if (pipefd[0] != -1)
+            {
+                close(pipefd[0]);
+                close(pipefd[1]);
+            }
+
+            // Input redirection: <
+            if (i == 0 && _inputFile != nullptr)
+            {
+                int fd = open(_inputFile, O_RDONLY);
+
+                if (fd < 0)
+                {
+                    perror("open input file");
+                    _exit(1);
+                }
+
+                if (dup2(fd, STDIN_FILENO) < 0)
+                {
+                    perror("dup2 input");
+                    close(fd);
+                    _exit(1);
+                }
+
+                close(fd);
+            }
+
+            // Output redirection: >, >>, and >>&
+            if (i == numberOfCommands - 1 && _outFile != nullptr)
+            {
+                int flags = O_WRONLY | O_CREAT;
+
+                if (_append == 1)
+                {
+                    flags |= O_APPEND;
+                }
+                else
+                {
+                    flags |= O_TRUNC;
+                }
+
+                int fd = open(_outFile, flags, 0644);
+
+                if (fd < 0)
+                {
+                    perror("open output file");
+                    _exit(1);
+                }
+
+                if (dup2(fd, STDOUT_FILENO) < 0)
+                {
+                    perror("dup2 output");
+                    close(fd);
+                    _exit(1);
+                }
+
+                //  >>&, redirect errors to the same file
+                if (_out_error == 1)
+                {
+                    if (dup2(fd, STDERR_FILENO) < 0)
+                    {
+                        perror("dup2 error");
+                        close(fd);
+                        _exit(1);
+                    }
+                }
+
+                close(fd);
+            }
+
+            // Error redirection: 2>
+            if (_errFile != nullptr && _out_error == 0)
+            {
+                int fd = open(_errFile,
+                              O_WRONLY | O_CREAT | O_TRUNC,
+                              0644);
+
+                if (fd < 0)
+                {
+                    perror("open error file");
+                    _exit(1);
+                }
+
+                if (dup2(fd, STDERR_FILENO) < 0)
+                {
+                    perror("dup2 error");
+                    close(fd);
+                    _exit(1);
+                }
+
+                close(fd);
+            }
+
+            // Execute the current command
+            SimpleCommand *simpleCommand = _simpleCommands[i];
+
+            execvp(simpleCommand->_arguments[0],
+                   simpleCommand->_arguments);
+                   
+            perror(simpleCommand->_arguments[0]);
+            _exit(127);
+        }
+        else
+        {
+            // PARENT PROCESS
+
+            pids.push_back(pid);
+
+            // After the fork, the parent no longer needs its copy of the previous pipe's read descriptor.
+            if (previousRead != -1)
+            {
+                close(previousRead);
+            }
+
+//A pipe signals that no more data will arrive when all open file descriptors referring to its write end have been closed.
+//If the parent accidentally keeps its write end open, sort might wait forever for more input—even after ls has finished.
+            if (pipefd[1] != -1)
+            {
+                close(pipefd[1]);
+            }
+
+            // Keep the read end for the next command
+            previousRead = pipefd[0];
+        }
+    }
+
+    // Wait for all commands unless running in the background
+    if (_background == 0)
+    {
+        for (pid_t childPid : pids)
+        {
+            while (waitpid(childPid, nullptr, 0) == -1)
             {
                 if (errno == EINTR)
                 {
@@ -482,11 +600,13 @@ void Command::execute()
                 break;
             }
         }
-        else
+    }
+    else
+    {
+        for (pid_t childPid : pids)
         {
-            // Background: do not wait for the child
             std::cout << "Started background process: "
-                      << pid << std::endl;
+                      << childPid << std::endl;
         }
     }
 
