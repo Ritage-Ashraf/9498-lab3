@@ -28,6 +28,16 @@
 #include "command.h"
 #include "tokenizer.h"
 
+void sigchld_handler(int sig)
+{
+    int fd = open("process.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+
+    if (fd != -1)
+    {
+        write(fd, "A child process terminated\n", 27);
+        close(fd);
+    }
+}
 
 void parse(std::vector<Token> &tokens)
 {
@@ -552,6 +562,7 @@ void Command::execute()
             }
 
             // Execute the current command
+            signal(SIGINT, SIG_DFL);
             SimpleCommand *simpleCommand = _simpleCommands[i];
 
             execvp(simpleCommand->_arguments[0],
@@ -621,6 +632,39 @@ void Command::prompt()
     while (true)
     {
         std::getline(std::cin, input); 
+        if (input == "exit")
+    {
+        printf("Good bye!!\n");
+        exit(0);
+    }
+        if (input == "cd" || input.substr(0, 3) == "cd ")
+{
+    std::string directory;
+
+    if (input == "cd")
+    {
+        const char *home = getenv("HOME");
+
+        if (home == nullptr)
+        {
+            fprintf(stderr, "cd: HOME not set\n");
+            continue;
+        }
+
+        directory = home;
+    }
+    else
+    {
+        directory = input.substr(3);
+    }
+
+    if (chdir(directory.c_str()) != 0)
+    {
+        perror("cd");
+    }
+
+    continue;
+}
         std::vector<Token> tokens = tokenize(input);
         parse(tokens);
     }
@@ -631,6 +675,8 @@ SimpleCommand *Command::_currentSimpleCommand;
 
 int main()
 {
+    signal(SIGINT, SIG_IGN);
+    signal(SIGCHLD, sigchld_handler);
     Command::_currentCommand.prompt();
     return 0;
 }
